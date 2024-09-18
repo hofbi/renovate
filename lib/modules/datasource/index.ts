@@ -161,36 +161,43 @@ async function mergeRegistries(
   datasource: DatasourceApi,
   registryUrls: string[],
 ): Promise<ReleaseResult | null> {
-  let combinedRes: ReleaseResult | undefined;
+  let combinedResult: ReleaseResult | undefined;
   let lastErr: Error | undefined;
-  let commonRegistryUrl = true;
+  let replaceRegistryUrl = true;
   for (const registryUrl of registryUrls) {
     try {
-      const res = await getRegistryReleases(datasource, config, registryUrl);
-      if (!res) {
+      const registryResult = await getRegistryReleases(
+        datasource,
+        config,
+        registryUrl,
+      );
+      if (!registryResult) {
+        // This registry has no results, we can skip remaining logic
         continue;
       }
 
-      if (!combinedRes) {
-        combinedRes = res;
+      if (!combinedResult) {
+        combinedResult = registryResult;
+        // This is the first registry with results so we can skip subsequent merging logic
         continue;
       }
 
-      if (commonRegistryUrl) {
-        for (const release of coerceArray(combinedRes.releases)) {
-          release.registryUrl ??= combinedRes.registryUrl;
+      if (replaceRegistryUrl) {
+        // If we have multiple registries, we need to one-time ensure all releases have registryUrl set
+        for (const release of coerceArray(combinedResult.releases)) {
+          release.registryUrl ??= combinedResult.registryUrl;
         }
-        commonRegistryUrl = false;
+        replaceRegistryUrl = false;
       }
 
-      const releases = coerceArray(res.releases);
+      const releases = coerceArray(registryResult.releases);
       for (const release of releases) {
-        release.registryUrl ??= res.registryUrl;
+        release.registryUrl ??= registryResult.registryUrl;
       }
 
-      combinedRes.releases.push(...releases);
-      combinedRes = { ...res, ...combinedRes };
-      delete combinedRes.registryUrl;
+      combinedResult.releases.push(...releases);
+      combinedResult = { ...registryResult, ...combinedResult };
+      delete combinedResult.registryUrl;
     } catch (err) {
       if (err instanceof ExternalHostError) {
         throw err;
@@ -201,7 +208,7 @@ async function mergeRegistries(
     }
   }
 
-  if (!combinedRes) {
+  if (!combinedResult) {
     if (lastErr) {
       throw lastErr;
     }
@@ -210,7 +217,7 @@ async function mergeRegistries(
   }
 
   const seenVersions = new Set<string>();
-  combinedRes.releases = filterMap(combinedRes.releases, (release) => {
+  combinedResult.releases = filterMap(combinedResult.releases, (release) => {
     if (seenVersions.has(release.version)) {
       return null;
     }
@@ -218,7 +225,7 @@ async function mergeRegistries(
     return release;
   });
 
-  return combinedRes;
+  return combinedResult;
 }
 
 function massageRegistryUrls(registryUrls: string[]): string[] {
